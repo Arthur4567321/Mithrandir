@@ -1,0 +1,21 @@
+{
+  "steps": [
+    {
+      "program": "curl",
+      "args": [
+        "-L",
+        "-f",
+        "-o",
+        "{archive}",
+        "{source}"
+      ]
+    },
+    {
+      "program": "tar",
+      "args": [
+        "-xf",
+        "{archive}"
+      ]
+    }
+  ]
+}
