@@ -1,8 +1,9 @@
+use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
-use serde::{Deserialize, Serialize};
 use clap::Parser;
+use serde::{Deserialize, Serialize};
 
 #[derive(Parser)]
 struct Cli {
@@ -40,6 +41,7 @@ struct Package {
     source: String,
     archive: String,
     dirname: Option<String>,
+    dependencies: Vec<String>,
 }
 
 #[derive(Deserialize, Serialize, Clone, Default)]
@@ -141,6 +143,46 @@ fn edit_recipe(editor: Option<String>) {
     }
 }
 
+fn find_pkg<'a>(packages: &'a PackageList, name: &str) -> Option<&'a Package> {
+    packages.packages.iter().find(|p| p.name == name)
+}
+
+fn install_recursive(name: &str, packages: &PackageList, recipe: &Recipe, visiting: &mut HashSet<String>) {
+    if visiting.contains(name) {
+        panic!("dependency cycle detected involving '{}'", name);
+    }
+
+    // already installed?
+    let installed_now = load_installed();
+    if installed_now.packages.iter().any(|p| p.name == name) {
+        println!("{} already installed, skipping", name);
+        return;
+    }
+
+    let pkg = find_pkg(packages, name).unwrap_or_else(|| panic!("package not found in {}: {}", PKG_FILE, name));
+
+    visiting.insert(name.to_string());
+
+    for dep in &pkg.dependencies {
+        install_recursive(dep, packages, recipe, visiting);
+    }
+
+    // re-check installed after installing deps
+    let installed_after = load_installed();
+    if installed_after.packages.iter().any(|p| p.name == name) {
+        println!("{} already installed after dependencies", name);
+        visiting.remove(name);
+        return;
+    }
+
+    println!("installing {}", name);
+    run_recipe_and_record(pkg, recipe);
+    // remove archive if desired
+    remove_tar(pkg.clone());
+
+    visiting.remove(name);
+}
+
 fn main() {
     let cli = Cli::parse();
 
@@ -158,7 +200,7 @@ fn main() {
     }
 
     if cli.remove {
-        for name in cli.packages {
+        for name in cli.packages.clone() {
             let pkg = packages.packages.iter()
                 .find(|p| p.name == name)
                 .unwrap_or_else(|| panic!("package not found in {}: {}", PKG_FILE, name));
@@ -169,7 +211,7 @@ fn main() {
     }
 
     if cli.update {
-        for name in cli.packages {
+        for name in cli.packages.clone() {
             let repo_pkg = packages.packages.iter()
                 .find(|p| p.name == name)
                 .unwrap_or_else(|| panic!("package not found in {}: {}", PKG_FILE, name));
@@ -178,13 +220,15 @@ fn main() {
             match installed.packages.iter().find(|p| p.name == name) {
                 None => {
                     println!("{} not installed — installing", name);
-                    run_recipe_and_record(repo_pkg, &recipe);
+                    let mut visiting = HashSet::new();
+                    install_recursive(&name, &packages, &recipe, &mut visiting);
                 }
                 Some(installed_pkg) => {
                     if installed_pkg.version != repo_pkg.version {
                         println!("updating {} from {} to {}", name, installed_pkg.version, repo_pkg.version);
                         remove_pkg_and_record(installed_pkg);
-                        run_recipe_and_record(repo_pkg, &recipe);
+                        let mut visiting = HashSet::new();
+                        install_recursive(&name, &packages, &recipe, &mut visiting);
                     } else {
                         println!("{} is up to date", name);
                     }
@@ -194,12 +238,8 @@ fn main() {
         return;
     }
 
-    for name in cli.packages {
-        let pkg = packages.packages.iter()
-            .find(|p| p.name == name)
-            .unwrap_or_else(|| panic!("package not found in {}: {}", PKG_FILE, name));
-        run_recipe_and_record(pkg, &recipe);
-        remove_tar(pkg.clone());
-        println!("installed {}", pkg.name);
+    let mut visiting = HashSet::new();
+    for name in cli.packages.clone() {
+        install_recursive(&name, &packages, &recipe, &mut visiting);
     }
 }
