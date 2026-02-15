@@ -1,71 +1,66 @@
 use std::collections::HashSet;
 use std::fs;
-use std::path::Path;
 use std::process::Command;
+use std::env; // added
 use clap::Parser;
 use serde::{Deserialize, Serialize};
 
+const PKG_FILE: &str = "src/packages.json";
+const RECIPE_FILE: &str = "src/binary.sh";
+const INSTALLED_FILE: &str = "src/installed.json";
+const SOURCE_FILE: &str = "src/source.sh";
+const REMOVE_FILE: &str = "src/remove.sh";
+
 #[derive(Parser)]
 struct Cli {
-    #[arg(index = 1, required = false)]
+    /// package names to act on
     packages: Vec<String>,
 
-    #[arg(index = 2, last = true)]
-    editor: Option<String>,
+    /// choose which file to edit: "binary" or "source"
+    #[arg(short, long)]
+    edit: Option<String>, // changed from bool -> Option<String>
 
-    #[arg(short,long)]
+    /// remove package(s)
+    #[arg(short, long)]
     remove: bool,
 
-    #[arg(short,long)]
+    /// update package(s)
+    #[arg(short, long)]
     update: bool,
-
-    #[arg(short,long)]
-    edit: bool,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize, Clone, Debug)]
 struct Recipe {
     steps: Vec<Step>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize, Clone, Debug)]
 struct Step {
     program: String,
     args: Vec<String>,
 }
 
-#[derive(Deserialize, Serialize, Clone)]
+#[derive(Deserialize, Serialize, Clone, Debug)]
 struct Package {
     name: String,
     version: String,
     source: String,
     archive: String,
-    dirname: Option<String>,
+    dirname: String,
     dependencies: Vec<String>,
+    recipe: Option<Recipe>,
 }
 
-#[derive(Deserialize, Serialize, Clone, Default)]
+#[derive(Deserialize, Serialize, Clone, Default, Debug)]
 struct PackageList {
     packages: Vec<Package>,
 }
 
-const PKG_FILE: &str = "src/packages.json";
-const RECIPE_FILE: &str = "src/recipe.json";
-const INSTALLED_FILE: &str = "src/installed.json";
-fn remove_tar(pkg: Package){
-    let status = Command::new("rm").args(["-rf",&pkg.archive]).status().unwrap_or_else(|_e| panic!("Failed to execute."));
-    if !status.success(){
-        println!("Sorry");
-    }
-}
-fn load_packages() -> PackageList {
-    let s = fs::read_to_string(PKG_FILE).expect("failed to read packages.json");
-    serde_json::from_str(&s).expect("invalid packages.json")
-}
+/* ---------- IO helpers ---------- */
 
-fn load_recipe() -> Recipe {
-    let s = fs::read_to_string(RECIPE_FILE).expect("failed to read recipe.json");
-    serde_json::from_str(&s).expect("invalid recipe.json")
+fn load_packages() -> PackageList {
+    let s = fs::read_to_string(PKG_FILE).unwrap_or_else(|_| panic!("failed to read {}", PKG_FILE));
+    serde_json::from_str(&s).expect("invalid packages.json")
 }
 
 fn load_installed() -> PackageList {
@@ -75,159 +70,194 @@ fn load_installed() -> PackageList {
     }
 }
 
-fn save_installed(list: &PackageList) {
-    let s = serde_json::to_string_pretty(list).expect("failed to serialize installed.json");
-    fs::write(INSTALLED_FILE, s).expect("failed to write installed.json");
+fn load_global_recipe() -> Option<Recipe> {
+    match fs::read_to_string(RECIPE_FILE) {
+        Ok(s) => serde_json::from_str(&s).ok(),
+        Err(_) => None,
+    }
 }
+
+/* ---------- small helpers ---------- */
 
 fn substitute(arg: &str, pkg: &Package) -> String {
     arg.replace("{archive}", &pkg.archive)
         .replace("{source}", &pkg.source)
+        .replace("{dirname}", &pkg.dirname)
+        .replace("{version}", &pkg.version)
+        .replace("{name}", &pkg.name)
 }
 
-fn run_recipe_and_record(pkg: &Package, recipe: &Recipe) {
-    let mut installed = load_installed();
+fn run_step(step: &Step, pkg: &Package) {
+    let args: Vec<String> = step.args.iter().map(|a| substitute(a, pkg)).collect();
+    println!("run: {} {}", step.program, args.join(" "));
+    let status = Command::new(&step.program)
+        .args(&args)
+        .status()
+        .unwrap_or_else(|e| panic!("failed to run {}: {}", step.program, e));
+    if !status.success() {
+        panic!("command failed: {} {}", step.program, args.join(" "));
+    }
+}
 
-    for (i, step) in recipe.steps.iter().enumerate() {
-        let args: Vec<String> = step.args.iter()
-            .map(|a| substitute(a, pkg))
-            .collect();
+/* ---------- recipe / install ---------- */
 
-        println!("[{}] running: {} {}", i, step.program, args.join(" "));
-        let status = Command::new(&step.program)
-            .args(&args)
-            .status()
-            .unwrap_or_else(|e| panic!("failed to execute {}: {}", step.program, e));
+fn run_recipe(pkg: &Package, global_recipe: Option<&Recipe>) {
+    let recipe = pkg.recipe.as_ref().or(global_recipe)
+        .unwrap_or_else(|| panic!("no recipe for package {} and no global recipe", pkg.name));
+    for step in &recipe.steps {
+        run_step(step, pkg);
+    }
+    // do not touch installed.json here; the invoked script/recipe should record installation
+}
 
-        if !status.success() {
-            panic!("step {} failed: {} {}", i, step.program, args.join(" "));
+/* ---------- removal helpers ---------- */
+
+fn run_remove_script(dirname: &str) {
+    let status = Command::new("sh")
+        .args(["./src/remove.sh", dirname])
+        .status()
+        .unwrap_or_else(|e| panic!("failed to execute remove.sh: {}", e));
+    if !status.success() {
+        eprintln!("warning: remove.sh exited with non-zero status for '{}'", dirname);
+    }
+}
+
+/* ---------- find helpers ---------- */
+
+fn find_in_repo<'a>(packages: &'a PackageList, name: &str) -> Option<&'a Package> {
+    packages.packages.iter().find(|p| p.name == name)
+}
+
+
+
+fn find_installed_by_dirname<'a>(installed: &'a PackageList, dirname: &str) -> Option<&'a Package> {
+    installed.packages.iter().find(|p| p.dirname == dirname)
+}
+
+/* ---------- recursive operations ---------- */
+
+fn install_recursive(
+    name: &str,
+    repo: &PackageList,
+    global_recipe: Option<&Recipe>,
+    visiting: &mut HashSet<String>,
+) {
+    if visiting.contains(name) {
+        panic!("dependency cycle detected: {}", name);
+    }
+
+    let installed_now = load_installed();
+    if installed_now.packages.iter().any(|p| p.name == name) {
+        println!("{} already installed; skipping", name);
+        return;
+    }
+
+    let pkg_owned = if let Some(p) = find_in_repo(repo, name) {
+        p.clone()
+    } else {
+        let installed = load_installed();
+        installed.packages.iter()
+            .find(|p| p.name == name)
+            .unwrap_or_else(|| panic!("package not found in {} or installed.json: {}", PKG_FILE, name))
+            .clone()
+    };
+
+    visiting.insert(name.to_string());
+    for dep in &pkg_owned.dependencies {
+        install_recursive(dep, repo, global_recipe, visiting);
+    }
+
+    let installed_after = load_installed();
+    if installed_after.packages.iter().any(|p| p.name == name) {
+        println!("{} installed by dependency step; skipping", name);
+        visiting.remove(name);
+        return;
+    }
+
+    println!("installing {}", name);
+    run_recipe(&pkg_owned, global_recipe);
+    let _ = Command::new("rm").args(["-rf", &pkg_owned.archive]).status();
+    visiting.remove(name);
+}
+
+fn remove_recursive(dirname: &str, _repo: &PackageList, visiting: &mut HashSet<String>) {
+    if visiting.contains(dirname) {
+        panic!("dependency cycle detected for dirname {}", dirname);
+    }
+
+    let installed_now = load_installed();
+    if !installed_now.packages.iter().any(|p| p.dirname == dirname) {
+        println!("{} not installed; skipping", dirname);
+        return;
+    }
+
+    let pkg = find_installed_by_dirname(&installed_now, dirname)
+        .unwrap_or_else(|| panic!("installed package with dirname '{}' not found in {}", dirname, INSTALLED_FILE));
+
+    visiting.insert(dirname.to_string());
+
+    for dep_name in &pkg.dependencies {
+        let installed = load_installed();
+        let used_by_other = installed.packages.iter()
+            .any(|p| p.dirname != pkg.dirname && p.dependencies.contains(dep_name));
+        if used_by_other {
+            println!("dependency '{}' is still required by another package; skipping", dep_name);
+            continue;
+        }
+
+        if let Some(dep_pkg) = installed.packages.iter().find(|p| p.name == *dep_name) {
+            remove_recursive(&dep_pkg.dirname, _repo, visiting);
+        } else {
+            println!("warning: dependency '{}' not installed; skipping", dep_name);
         }
     }
 
-    installed.packages.push(pkg.clone());
-    save_installed(&installed);
+    let installed_after = load_installed();
+    if !installed_after.packages.iter().any(|p| p.dirname == dirname) {
+        println!("{} already removed by dependency cleanup", dirname);
+        visiting.remove(dirname);
+        return;
+    }
+
+    println!("removing {}", pkg.name);
+    run_remove_script(&pkg.dirname);
+    let _ = fs::remove_file(&pkg.archive);
+
+    visiting.remove(dirname);
 }
 
-fn remove_pkg_and_record(pkg: &Package) {
-    if let Some(dir) = &pkg.dirname {
-        if !dir.is_empty() {
-            if let Err(e) = fs::remove_dir_all(dir) {
-                eprintln!("warning: failed to remove {}: {}", dir, e);
-            }
+/* ---------- CLI / main ---------- */
+
+fn edit_recipe(target: &str) {
+    let file_to_edit = match target {
+        "binary" => RECIPE_FILE,
+        "source" => SOURCE_FILE,
+        "remove" => REMOVE_FILE,
+        other => {
+            eprintln!("unknown edit target: {} (use 'binary' or 'source')", other);
+            std::process::exit(2);
         }
-    }
+    };
 
-    if Path::new(&pkg.archive).exists() {
-        if let Err(e) = fs::remove_file(&pkg.archive) {
-            eprintln!("warning: failed to remove archive {}: {}", &pkg.archive, e);
-        }
-    }
-
-    let mut installed = load_installed();
-    let before = installed.packages.len();
-    installed.packages.retain(|p| p.name != pkg.name);
-    if installed.packages.len() == before {
-        eprintln!("warning: '{}' was not listed in {}", pkg.name, INSTALLED_FILE);
-    }
-    save_installed(&installed);
-}
-
-fn edit_recipe(editor: Option<String>) {
-    let editor = editor
-        .or_else(|| std::env::var("EDITOR").ok())
-        .unwrap_or_else(|| "vi".to_string());
-    let status = Command::new(editor).arg(RECIPE_FILE).status()
-        .expect("failed to launch editor");
+    let editor = env::var("EDITOR").unwrap_or_else(|_| "nano".to_string());
+    let status = Command::new(editor).arg(file_to_edit).status()
+        .unwrap_or_else(|e| panic!("failed to launch editor: {}", e));
     if !status.success() {
         eprintln!("editor exited with non-zero status");
     }
 }
 
-fn find_pkg<'a>(packages: &'a PackageList, name: &str) -> Option<&'a Package> {
-    packages.packages.iter().find(|p| p.name == name)
-}
-
-fn install_recursive(name: &str, packages: &PackageList, recipe: &Recipe, visiting: &mut HashSet<String>) {
-    if visiting.contains(name) {
-        panic!("dependency cycle detected involving '{}'", name);
-    }
-
-    // already installed?
-    let installed_now = load_installed();
-    if installed_now.packages.iter().any(|p| p.name == name) {
-        println!("{} already installed, skipping", name);
-        return;
-    }
-
-    let pkg = find_pkg(packages, name).unwrap_or_else(|| panic!("package not found in {}: {}", PKG_FILE, name));
-
-    visiting.insert(name.to_string());
-
-    for dep in &pkg.dependencies {
-        install_recursive(dep, packages, recipe, visiting);
-    }
-
-    // re-check installed after installing deps
-    let installed_after = load_installed();
-    if installed_after.packages.iter().any(|p| p.name == name) {
-        println!("{} already installed after dependencies", name);
-        visiting.remove(name);
-        return;
-    }
-
-    println!("installing {}", name);
-    run_recipe_and_record(pkg, recipe);
-    // remove archive if desired
-    remove_tar(pkg.clone());
-
-    visiting.remove(name);
-}
-fn remove_recursive(name: &str, packages: &PackageList, visiting: &mut HashSet<String>) {
-    if visiting.contains(name) {
-        panic!("dependency cycle detected involving '{}'", name);
-    }
-
-    // already installed?
-    let installed_now = load_installed();
-    if installed_now.packages.iter().any(|p| p.name == name) {
-        println!("{} already installed, skipping", name);
-        return;
-    }
-
-    let pkg = find_pkg(packages, name).unwrap_or_else(|| panic!("package not found in {}: {}", PKG_FILE, name));
-
-    visiting.insert(name.to_string());
-
-    for dep in &pkg.dependencies {
-        remove_recursive(dep, packages,visiting);
-    }
-
-    // re-check installed after installing deps
-    let installed_after = load_installed();
-    if installed_after.packages.iter().any(|p| p.name == name) {
-        println!("{} already installed after dependencies", name);
-        visiting.remove(name);
-        return;
-    }
-
-    println!("installing {}", name);
-    remove_pkg_and_record(pkg);
-    
-    
-
-    visiting.remove(name);
-}
-
 fn main() {
     let cli = Cli::parse();
 
-    if cli.edit {
-        edit_recipe(cli.editor.clone());
+    if let Some(ref target) = cli.edit {
+        edit_recipe(target);
         return;
     }
 
-    let packages = load_packages();
-    let recipe = load_recipe();
+    let repo = load_packages();
+    let global_recipe = load_global_recipe();
+    let installed_now = load_installed();
 
     if cli.packages.is_empty() {
         eprintln!("no package names provided");
@@ -236,18 +266,19 @@ fn main() {
 
     if cli.remove {
         for name in cli.packages.clone() {
-            let pkg = packages.packages.iter()
+            let target_pkg = installed_now.packages.iter()
                 .find(|p| p.name == name)
-                .unwrap_or_else(|| panic!("package not found in {}: {}", PKG_FILE, name));
-            remove_pkg_and_record(pkg);
-            println!("removed {}", pkg.name);
+                .unwrap_or_else(|| panic!("installed package not found: {}", name));
+            let mut visiting = HashSet::new();
+            remove_recursive(&target_pkg.dirname, &repo, &mut visiting);
+            println!("removed {}", target_pkg.name);
         }
         return;
     }
 
     if cli.update {
         for name in cli.packages.clone() {
-            let repo_pkg = packages.packages.iter()
+            let repo_pkg = repo.packages.iter()
                 .find(|p| p.name == name)
                 .unwrap_or_else(|| panic!("package not found in {}: {}", PKG_FILE, name));
 
@@ -256,15 +287,14 @@ fn main() {
                 None => {
                     println!("{} not installed — installing", name);
                     let mut visiting = HashSet::new();
-                    install_recursive(&name, &packages, &recipe, &mut visiting);
+                    install_recursive(&name, &repo, global_recipe.as_ref(), &mut visiting);
                 }
                 Some(installed_pkg) => {
                     let mut visiting = HashSet::new();
                     if installed_pkg.version != repo_pkg.version {
                         println!("updating {} from {} to {}", name, installed_pkg.version, repo_pkg.version);
-                        remove_recursive(&installed_pkg.name,&packages,&mut visiting);
-                      
-                        install_recursive(&name, &packages, &recipe, &mut visiting);
+                        remove_recursive(&installed_pkg.dirname, &repo, &mut visiting);
+                        install_recursive(&name, &repo, global_recipe.as_ref(), &mut visiting);
                     } else {
                         println!("{} is up to date", name);
                     }
@@ -276,6 +306,6 @@ fn main() {
 
     let mut visiting = HashSet::new();
     for name in cli.packages.clone() {
-        install_recursive(&name, &packages, &recipe, &mut visiting);
+        install_recursive(&name, &repo, global_recipe.as_ref(), &mut visiting);
     }
 }
