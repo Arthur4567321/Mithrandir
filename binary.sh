@@ -13,7 +13,7 @@ ORIG_DIRNAME="$3"
 VERSION="$4"
 NAME="$5"
 
-MTR_STORE="/usr/local/bin/mtr/store"
+MTR_STORE="/usr/local/bin/mtr-store"
 PACKAGES_FILE="/usr/local/bin/src/packages.json"
 INSTALLED_FILE="/usr/local/bin/src/installed.json"
 
