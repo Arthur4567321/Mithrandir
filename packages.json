@@ -11,7 +11,7 @@
         "steps": [
           {
             "program":"sh",
-            "args":["./src/binary.sh","{source}","{archive}","{dirname}","{version}","{name}"]
+            "args":["/usr/local/bin/src/binary.sh","{source}","{archive}","{dirname}","{version}","{name}"]
           }
         ]
       }
@@ -27,7 +27,7 @@
         "steps": [
          {
             "program":"sh",
-            "args":["./src/binary.sh","{source}","{archive}","{dirname}","{version}","{name}"]
+            "args":["/usr/local/bin/src/binary.sh","{source}","{archive}","{dirname}","{version}","{name}"]
           }
         ]
       }
@@ -43,7 +43,7 @@
         "steps": [
           {
             "program":"sh",
-            "args":["./src/binary.sh","{source}","{archive}","{dirname}","{version}","{name}"]
+            "args":["/usr/local/bin/src/binary.sh","{source}","{archive}","{dirname}","{version}","{name}"]
           }
         ]
       }

@@ -5,11 +5,11 @@ use std::env; // added
 use clap::Parser;
 use serde::{Deserialize, Serialize};
 
-const PKG_FILE: &str = "usr/local/bin/src/packages.json";
-const RECIPE_FILE: &str = "usr/local/bin/src/binary.sh";
-const INSTALLED_FILE: &str = "usr/local/bin/src/installed.json";
-const SOURCE_FILE: &str = "usr/local/bin/src/source.sh";
-const REMOVE_FILE: &str = "usr/local/bin/src/remove.sh";
+const PKG_FILE: &str = "/usr/local/bin/src/packages.json";
+const RECIPE_FILE: &str = "/usr/local/bin/src/binary.sh";
+const INSTALLED_FILE: &str = "/usr/local/bin/src/installed.json";
+const SOURCE_FILE: &str = "/usr/local/bin/src/source.sh";
+const REMOVE_FILE: &str = "/usr/local/bin/src/remove.sh";
 
 #[derive(Parser)]
 struct Cli {
@@ -114,7 +114,7 @@ fn run_recipe(pkg: &Package, global_recipe: Option<&Recipe>) {
 
 fn run_remove_script(dirname: &str) {
     let status = Command::new("sh")
-        .args(["./src/remove.sh", dirname])
+        .args([REMOVE_FILE, dirname])
         .status()
         .unwrap_or_else(|e| panic!("failed to execute remove.sh: {}", e));
     if !status.success() {

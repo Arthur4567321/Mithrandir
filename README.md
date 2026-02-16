@@ -10,3 +10,22 @@ If you are a beginner don't install Mithrandir, just like Gandalf, Mithrandir is
 I hope you like it.
 
 Anonymous King.
+
+## Installation
+
+Use the installer to build and install `mtr` system-wide:
+
+```bash
+./install.sh
+```
+
+This installs:
+- executable: `/usr/local/bin/mtr`
+- runtime files: `/usr/local/bin/src/*`
+- package store: `/usr/local/bin/mtr/store`
+
+After that, run commands like:
+
+```bash
+mtr go
+```

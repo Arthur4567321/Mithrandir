@@ -7,7 +7,7 @@ if [ "$#" -ne 1 ]; then
 fi
 
 TARGET="$1"
-INSTALLED="src/installed.json"
+INSTALLED="/usr/local/bin/src/installed.json"
 
 command -v jq >/dev/null 2>&1 || { echo "error: jq required" >&2; exit 1; }
 

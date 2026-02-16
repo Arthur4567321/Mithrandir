@@ -13,9 +13,9 @@ ORIG_DIRNAME="$3"
 VERSION="$4"
 NAME="$5"
 
-MTR_STORE="mtr/store"
-PACKAGES_FILE="src/packages.json"
-INSTALLED_FILE="src/installed.json"
+MTR_STORE="/usr/local/bin/mtr/store"
+PACKAGES_FILE="/usr/local/bin/src/packages.json"
+INSTALLED_FILE="/usr/local/bin/src/installed.json"
 
 for cmd in curl tar jq; do
   command -v "$cmd" >/dev/null 2>&1 || { echo "error: $cmd required" >&2; exit 1; }
