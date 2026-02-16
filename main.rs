@@ -5,11 +5,11 @@ use std::env; // added
 use clap::Parser;
 use serde::{Deserialize, Serialize};
 
-const PKG_FILE: &str = "src/packages.json";
-const RECIPE_FILE: &str = "src/binary.sh";
-const INSTALLED_FILE: &str = "src/installed.json";
-const SOURCE_FILE: &str = "src/source.sh";
-const REMOVE_FILE: &str = "src/remove.sh";
+const PKG_FILE: &str = "usr/local/bin/src/packages.json";
+const RECIPE_FILE: &str = "usr/local/bin/src/binary.sh";
+const INSTALLED_FILE: &str = "usr/local/bin/src/installed.json";
+const SOURCE_FILE: &str = "usr/local/bin/src/source.sh";
+const REMOVE_FILE: &str = "usr/local/bin/src/remove.sh";
 
 #[derive(Parser)]
 struct Cli {
