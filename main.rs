@@ -1,11 +1,13 @@
-use std::collections::HashSet;
-use std::fs;
-use std::process::Command;
-use std::env; // added
 use clap::Parser;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
+use std::env; // added
+use std::fs;
+use std::process::Command;
 
-const PKG_FILE: &str = "usr/local/bin/src/packages.json";
+const DEFAULT_PKG_URL: &str = "http://127.0.0.1:8080/packages.json";
+const DEFAULT_GITHUB_BRANCH: &str = "main";
+const DEFAULT_GITHUB_PATH: &str = "packages.json";
 const RECIPE_FILE: &str = "usr/local/bin/src/binary.sh";
 const INSTALLED_FILE: &str = "usr/local/bin/src/installed.json";
 const SOURCE_FILE: &str = "usr/local/bin/src/source.sh";
@@ -58,9 +60,49 @@ struct PackageList {
 
 /* ---------- IO helpers ---------- */
 
+fn package_index_url() -> String {
+    if let Ok(url) = env::var("MTR_PACKAGES_URL") {
+        return url;
+    }
+
+    if let Ok(repo) = env::var("MTR_PACKAGES_GITHUB_REPO") {
+        let branch =
+            env::var("MTR_PACKAGES_GITHUB_BRANCH").unwrap_or_else(|_| DEFAULT_GITHUB_BRANCH.into());
+        let path =
+            env::var("MTR_PACKAGES_GITHUB_PATH").unwrap_or_else(|_| DEFAULT_GITHUB_PATH.into());
+        return format!(
+            "https://raw.githubusercontent.com/{}/{}/{}",
+            repo,
+            branch,
+            path.trim_start_matches('/')
+        );
+    }
+
+    DEFAULT_PKG_URL.to_string()
+}
+
 fn load_packages() -> PackageList {
-    let s = fs::read_to_string(PKG_FILE).unwrap_or_else(|_| panic!("failed to read {}", PKG_FILE));
-    serde_json::from_str(&s).expect("invalid packages.json")
+    let pkg_url = package_index_url();
+    let response = reqwest::blocking::get(&pkg_url)
+        .unwrap_or_else(|e| panic!("failed to fetch package index from {}: {}", pkg_url, e));
+
+    if !response.status().is_success() {
+        panic!(
+            "package index server returned {} for {}",
+            response.status(),
+            pkg_url
+        );
+    }
+
+    let body = response.text().unwrap_or_else(|e| {
+        panic!(
+            "failed to read package index response from {}: {}",
+            pkg_url, e
+        )
+    });
+
+    serde_json::from_str(&body)
+        .unwrap_or_else(|e| panic!("invalid package index from {}: {}", pkg_url, e))
 }
 
 fn load_installed() -> PackageList {
@@ -102,7 +144,10 @@ fn run_step(step: &Step, pkg: &Package) {
 /* ---------- recipe / install ---------- */
 
 fn run_recipe(pkg: &Package, global_recipe: Option<&Recipe>) {
-    let recipe = pkg.recipe.as_ref().or(global_recipe)
+    let recipe = pkg
+        .recipe
+        .as_ref()
+        .or(global_recipe)
         .unwrap_or_else(|| panic!("no recipe for package {} and no global recipe", pkg.name));
     for step in &recipe.steps {
         run_step(step, pkg);
@@ -118,7 +163,10 @@ fn run_remove_script(dirname: &str) {
         .status()
         .unwrap_or_else(|e| panic!("failed to execute remove.sh: {}", e));
     if !status.success() {
-        eprintln!("warning: remove.sh exited with non-zero status for '{}'", dirname);
+        eprintln!(
+            "warning: remove.sh exited with non-zero status for '{}'",
+            dirname
+        );
     }
 }
 
@@ -127,8 +175,6 @@ fn run_remove_script(dirname: &str) {
 fn find_in_repo<'a>(packages: &'a PackageList, name: &str) -> Option<&'a Package> {
     packages.packages.iter().find(|p| p.name == name)
 }
-
-
 
 fn find_installed_by_dirname<'a>(installed: &'a PackageList, dirname: &str) -> Option<&'a Package> {
     installed.packages.iter().find(|p| p.dirname == dirname)
@@ -156,9 +202,16 @@ fn install_recursive(
         p.clone()
     } else {
         let installed = load_installed();
-        installed.packages.iter()
+        installed
+            .packages
+            .iter()
             .find(|p| p.name == name)
-            .unwrap_or_else(|| panic!("package not found in {} or installed.json: {}", PKG_FILE, name))
+            .unwrap_or_else(|| {
+                panic!(
+                    "package not found in package index or installed.json: {}",
+                    name
+                )
+            })
             .clone()
     };
 
@@ -176,7 +229,9 @@ fn install_recursive(
 
     println!("installing {}", name);
     run_recipe(&pkg_owned, global_recipe);
-    let _ = Command::new("rm").args(["-rf", &pkg_owned.archive]).status();
+    let _ = Command::new("rm")
+        .args(["-rf", &pkg_owned.archive])
+        .status();
     visiting.remove(name);
 }
 
@@ -191,17 +246,26 @@ fn remove_recursive(dirname: &str, _repo: &PackageList, visiting: &mut HashSet<S
         return;
     }
 
-    let pkg = find_installed_by_dirname(&installed_now, dirname)
-        .unwrap_or_else(|| panic!("installed package with dirname '{}' not found in {}", dirname, INSTALLED_FILE));
+    let pkg = find_installed_by_dirname(&installed_now, dirname).unwrap_or_else(|| {
+        panic!(
+            "installed package with dirname '{}' not found in {}",
+            dirname, INSTALLED_FILE
+        )
+    });
 
     visiting.insert(dirname.to_string());
 
     for dep_name in &pkg.dependencies {
         let installed = load_installed();
-        let used_by_other = installed.packages.iter()
+        let used_by_other = installed
+            .packages
+            .iter()
             .any(|p| p.dirname != pkg.dirname && p.dependencies.contains(dep_name));
         if used_by_other {
-            println!("dependency '{}' is still required by another package; skipping", dep_name);
+            println!(
+                "dependency '{}' is still required by another package; skipping",
+                dep_name
+            );
             continue;
         }
 
@@ -213,7 +277,11 @@ fn remove_recursive(dirname: &str, _repo: &PackageList, visiting: &mut HashSet<S
     }
 
     let installed_after = load_installed();
-    if !installed_after.packages.iter().any(|p| p.dirname == dirname) {
+    if !installed_after
+        .packages
+        .iter()
+        .any(|p| p.dirname == dirname)
+    {
         println!("{} already removed by dependency cleanup", dirname);
         visiting.remove(dirname);
         return;
@@ -240,7 +308,9 @@ fn edit_recipe(target: &str) {
     };
 
     let editor = env::var("EDITOR").unwrap_or_else(|_| "nano".to_string());
-    let status = Command::new(editor).arg(file_to_edit).status()
+    let status = Command::new(editor)
+        .arg(file_to_edit)
+        .status()
         .unwrap_or_else(|e| panic!("failed to launch editor: {}", e));
     if !status.success() {
         eprintln!("editor exited with non-zero status");
@@ -266,7 +336,9 @@ fn main() {
 
     if cli.remove {
         for name in cli.packages.clone() {
-            let target_pkg = installed_now.packages.iter()
+            let target_pkg = installed_now
+                .packages
+                .iter()
                 .find(|p| p.name == name)
                 .unwrap_or_else(|| panic!("installed package not found: {}", name));
             let mut visiting = HashSet::new();
@@ -278,9 +350,11 @@ fn main() {
 
     if cli.update {
         for name in cli.packages.clone() {
-            let repo_pkg = repo.packages.iter()
+            let repo_pkg = repo
+                .packages
+                .iter()
                 .find(|p| p.name == name)
-                .unwrap_or_else(|| panic!("package not found in {}: {}", PKG_FILE, name));
+                .unwrap_or_else(|| panic!("package not found in package index: {}", name));
 
             let installed = load_installed();
             match installed.packages.iter().find(|p| p.name == name) {
@@ -292,7 +366,10 @@ fn main() {
                 Some(installed_pkg) => {
                     let mut visiting = HashSet::new();
                     if installed_pkg.version != repo_pkg.version {
-                        println!("updating {} from {} to {}", name, installed_pkg.version, repo_pkg.version);
+                        println!(
+                            "updating {} from {} to {}",
+                            name, installed_pkg.version, repo_pkg.version
+                        );
                         remove_recursive(&installed_pkg.dirname, &repo, &mut visiting);
                         install_recursive(&name, &repo, global_recipe.as_ref(), &mut visiting);
                     } else {
