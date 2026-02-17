@@ -1,5 +1,5 @@
 # Mithrandir
-This is a simple small package manager called Mithrandir.
+This is a very dumb package manager called Mithrandir.
 It's nothing much, but i think it has something special. It is very customizable.
 
 On the recipe.json you can choose the programs the package manager will execute to install certain packages. This allows the package manager to install binaries, compile from source ,install other files like .deb,.rpm etc.
@@ -10,3 +10,4 @@ If you are a beginner don't install Mithrandir, just like Gandalf, Mithrandir is
 I hope you like it.
 
 Anonymous King.
+
