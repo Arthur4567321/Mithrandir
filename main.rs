@@ -29,6 +29,8 @@ struct Cli {
     /// update package(s)
     #[arg(short, long)]
     update: bool,
+    #[arg(short,long)]
+    search:Option<String>,
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
@@ -64,7 +66,7 @@ struct PackageList {
 
 fn load_packages(url: &str) -> PackageList {
     let pkg_url = url;
-    let response = reqwest::blocking::get(&pkg_url)
+    let response = reqwest::blocking::get(pkg_url)
         .unwrap_or_else(|e| panic!("failed to fetch package index from {}: {}", pkg_url, e));
 
     if !response.status().is_success() {
