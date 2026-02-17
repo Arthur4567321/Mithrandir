@@ -5,9 +5,7 @@ use std::env; // added
 use std::fs;
 use std::process::Command;
 
-const DEFAULT_PKG_URL: &str = "http://127.0.0.1:8080/packages.json";
-const DEFAULT_GITHUB_BRANCH: &str = "main";
-const DEFAULT_GITHUB_PATH: &str = "packages.json";
+
 const RECIPE_FILE: &str = "usr/local/bin/src/binary.sh";
 const INSTALLED_FILE: &str = "usr/local/bin/src/installed.json";
 const SOURCE_FILE: &str = "usr/local/bin/src/source.sh";
