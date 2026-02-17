@@ -60,29 +60,10 @@ struct PackageList {
 
 /* ---------- IO helpers ---------- */
 
-fn package_index_url() -> String {
-    if let Ok(url) = env::var("MTR_PACKAGES_URL") {
-        return url;
-    }
 
-    if let Ok(repo) = env::var("MTR_PACKAGES_GITHUB_REPO") {
-        let branch =
-            env::var("MTR_PACKAGES_GITHUB_BRANCH").unwrap_or_else(|_| DEFAULT_GITHUB_BRANCH.into());
-        let path =
-            env::var("MTR_PACKAGES_GITHUB_PATH").unwrap_or_else(|_| DEFAULT_GITHUB_PATH.into());
-        return format!(
-            "https://raw.githubusercontent.com/{}/{}/{}",
-            repo,
-            branch,
-            path.trim_start_matches('/')
-        );
-    }
 
-    DEFAULT_PKG_URL.to_string()
-}
-
-fn load_packages() -> PackageList {
-    let pkg_url = package_index_url();
+fn load_packages(url: &str) -> PackageList {
+    let pkg_url = url;
     let response = reqwest::blocking::get(&pkg_url)
         .unwrap_or_else(|e| panic!("failed to fetch package index from {}: {}", pkg_url, e));
 
@@ -325,7 +306,7 @@ fn main() {
         return;
     }
 
-    let repo = load_packages();
+    let repo = load_packages("https://raw.githubusercontent.com/Arthur4567321/packages-mtr/refs/heads/main/packages.json");
     let global_recipe = load_global_recipe();
     let installed_now = load_installed();
 
