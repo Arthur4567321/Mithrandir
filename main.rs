@@ -27,6 +27,7 @@ struct Cli {
     /// update package(s)
     #[arg(short, long)]
     update: bool,
+
     #[arg(short,long)]
     search:Option<String>,
 }
@@ -310,6 +311,36 @@ fn main() {
     let global_recipe = load_global_recipe();
     let installed_now = load_installed();
 
+    // handle search first: support either a substring search (--search term)
+    // or checking explicit positional package names (program <pkg> --search)
+    if cli.search.is_some() {
+        let term = cli.search.as_ref().unwrap();
+        if cli.packages.is_empty() {
+            let matches: Vec<_> = repo
+                .packages
+                .iter()
+                .filter(|p| p.name.contains(term))
+                .collect();
+            if matches.is_empty() {
+                println!("no packages match '{}'", term);
+            } else {
+                for p in matches {
+                    println!("package found: {}", p.name);
+                }
+            }
+        } else {
+            for name in cli.packages.clone() {
+                let repo_pkgs = repo.packages.iter().find(|p| p.name == name);
+                if let Some(p) = repo_pkgs {
+                    println!("package exists: {}", p.name);
+                } else {
+                    println!("package doesn't exist: {}", name);
+                }
+            }
+        }
+        return;
+    }
+
     if cli.packages.is_empty() {
         eprintln!("no package names provided");
         std::process::exit(1);
@@ -327,6 +358,20 @@ fn main() {
             println!("removed {}", target_pkg.name);
         }
         return;
+    }
+    if cli.search.is_some() {
+        for name in cli.packages.clone(){
+            let repo_pkgs = repo
+                .packages
+                .iter()
+                .find(|p| p.name == name);
+            if repo_pkgs.is_some(){
+		println!("package exists: {}",repo_pkgs.unwrap().name);
+		}
+	    else{
+		println!("package doesn't exist.");
+		}
+        }
     }
 
     if cli.update {
@@ -367,3 +412,4 @@ fn main() {
         install_recursive(&name, &repo, global_recipe.as_ref(), &mut visiting);
     }
 }
+
