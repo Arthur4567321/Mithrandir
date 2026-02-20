@@ -6,10 +6,10 @@ use std::fs;
 use std::process::Command;
 
 
-const RECIPE_FILE: &str = "usr/local/bin/src/binary.sh";
-const INSTALLED_FILE: &str = "usr/local/bin/src/installed.json";
-const SOURCE_FILE: &str = "usr/local/bin/src/source.sh";
-const REMOVE_FILE: &str = "usr/local/bin/src/remove.sh";
+const RECIPE_FILE: &str = "/usr/local/bin/src/binary.sh";
+const INSTALLED_FILE: &str = "/usr/local/bin/src/installed.json";
+const SOURCE_FILE: &str = "/usr/local/bin/src/source.sh";
+const REMOVE_FILE: &str = "/usr/local/bin/src/remove.sh";
 
 #[derive(Parser)]
 struct Cli {
