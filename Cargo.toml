@@ -1,17 +1,6 @@
 [package]
-name = "mtr"
+name = "mithrandir"
 version = "0.1.0"
 edition = "2024"
-include = ["mtr/**", "Cargo.toml", "Cargo.lock", "README*"]
+
 [dependencies]
-serde = { version = "1.0", features = ["derive"] }
-toml = "0.8"
-semver = "1.0"
-serde_json = "1.0.149"
-clap = { version = "4", features = ["derive"] }
-reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
-
-
-[[bin]]
-name = "mtr"
-path = "main.rs"
